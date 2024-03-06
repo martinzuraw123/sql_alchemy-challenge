@@ -10,6 +10,7 @@ from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime, timedelta
 
 from flask import Flask, jsonify
 
@@ -32,8 +33,8 @@ Base.prepare(engine, reflect=True)
 Measurements = Base.classes.measurement
 Station = Base.classes.station
 
-# Create our session (link) from Python to the DB
-Session = Session(engine)
+# Create a sessionmaker instance bound to the engine
+Session = sessionmaker(bind=engine)
 
 #################################################
 # Flask Setup
@@ -57,8 +58,6 @@ def home():
         "/api/v1.0/start_date/<string:start_date>/end_date/<string:end_date><br/>"
     )
 
-# Create a sessionmaker instance bound to the engine
-Session = sessionmaker(bind=engine)
 
 # Define route to get precipitation data
 @app.route('/api/v1.0/precipitation')
@@ -97,9 +96,23 @@ def stations():
 def tobs():
     session_instance = Session()
     try:
+        # Query the most active station
+        most_active_station = session_instance.query(Measurements.station) \
+            .group_by(Measurements.station) \
+            .order_by(func.count(Measurements.id).desc()).first()[0]
+
+        # Calculate the date for the last year of data
+        last_date = datetime.strptime('2017-08-18', '%Y-%m-%d')
+        one_year_ago = last_date - timedelta(days=365)
+
         # Query temperature observation data from Measurements table
-        results = session_instance.query(Measurements.date, Measurements.tobs)
-        tobs_data = {date: tobs for date, tobs in results}
+        results = session_instance.query(Measurements.date, Measurements.tobs) \
+            .filter(Measurements.station == most_active_station) \
+            .filter(Measurements.date >= one_year_ago).all()
+
+        
+        tobs_data = {str(date): tobs for date, tobs in results}
+    
     except Exception as e:
         return jsonify({'error': str(e)})
     finally:
